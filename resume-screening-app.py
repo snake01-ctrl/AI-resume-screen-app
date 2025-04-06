@@ -1,112 +1,115 @@
 import streamlit as st
-import pdfplumber
+import pandas as pd
 import re
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from difflib import SequenceMatcher
+import PyPDF2
+import matplotlib.pyplot as plt
+import plotly.express as px
 from io import StringIO
 import base64
-import pandas as pd
 
-# Define roles and keywords
+# Define job roles and associated keywords
 roles_keywords = {
-    "Data Scientist": ["python", "machine learning", "data analysis", "pandas", "numpy", "tensorflow", "keras", "statistics", "modeling", "data visualization"],
-    "Web Developer": ["html", "css", "javascript", "react", "node.js", "express", "frontend", "backend", "web development"],
-    "Software Engineer": ["java", "c++", "software development", "object-oriented programming", "algorithms", "data structures", "version control"],
-    "UI/UX Designer": ["figma", "adobe xd", "wireframes", "prototyping", "user research", "design thinking", "ui", "ux"],
-    "Cybersecurity Analyst": ["network security", "penetration testing", "firewalls", "encryption", "vulnerability assessment", "threat analysis"],
-    "AI/ML Engineer": ["deep learning", "machine learning", "neural networks", "pytorch", "scikit-learn", "ai", "cv", "nlp"],
-    "Business Analyst": ["excel", "data analysis", "sql", "requirement gathering", "stakeholder management", "business intelligence", "dashboards"],
-    "Cloud Engineer": ["aws", "azure", "cloud computing", "devops", "containers", "kubernetes", "infrastructure", "terraform"],
-    "Mobile App Developer": ["android", "ios", "react native", "flutter", "kotlin", "swift", "mobile development"],
-    "Network Engineer": ["routing", "switching", "cisco", "firewalls", "network protocols", "lan", "wan", "vpn"],
-    "Fitness Trainer": ["fitness", "exercise", "personal training", "workout", "nutrition", "strength training", "certified trainer"]
+    "Data Scientist": ["python", "machine learning", "data analysis", "pandas", "numpy", "regression", "classification"],
+    "Web Developer": ["html", "css", "javascript", "react", "node.js", "frontend", "backend", "api"],
+    "Fitness Trainer": ["exercise", "nutrition", "fitness", "training", "wellness", "strength", "cardio"]
 }
 
 # Extract text from PDF
-def extract_text_from_pdf(file):
-    with pdfplumber.open(file) as pdf:
-        text = ""
-        for page in pdf.pages:
-            text += page.extract_text() + "\n"
+def extract_text_from_pdf(pdf_file):
+    pdf_reader = PyPDF2.PdfReader(pdf_file)
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text()
     return text
 
-# Preprocess text
+# Preprocess the resume text
 def preprocess_text(text):
     text = text.lower()
-    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
+    text = re.sub(r'\W+', ' ', text)
     return text
 
-# Get keyword match score
+# Keyword match scoring
 def get_keyword_match_score(resume_text, keywords):
-    matched_keywords = [kw for kw in keywords if kw in resume_text]
+    matched_keywords = [kw for kw in keywords if kw.lower() in resume_text]
     score = len(matched_keywords) / len(keywords)
     return score, matched_keywords
 
 # Skill gap analysis
-def skill_gap_analysis(keywords, matched):
-    missing = list(set(keywords) - set(matched))
-    return missing
+def skill_gap_analysis(keywords, matched_keywords):
+    return list(set(keywords) - set(matched_keywords))
 
-# Generate download link
+# Dummy resume summarizer
+def summarize_resume(resume_text):
+    words = resume_text.split()
+    return " ".join(words[:50]) + "..." if len(words) > 50 else resume_text
+
+# CSV download link
 def get_download_link(df):
     csv = df.to_csv(index=False)
     b64 = base64.b64encode(csv.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="resume_match_results.csv">Download Results as CSV</a>'
+    href = f'<a href="data:file/csv;base64,{b64}" download="resume_screening_results.csv">📥 Download Results as CSV</a>'
     return href
 
-# Summarize resume
-def summarize_resume(text):
-    lines = text.strip().split("\n")
-    summary_lines = lines[:5] if len(lines) >= 5 else lines
-    return " ".join(summary_lines)
+# Streamlit UI
+st.set_page_config(page_title="AI Resume Screening", layout="wide")
+st.title("🤖 AI-Powered Resume Screening App with Visual Analysis")
+st.write("Upload one or more resumes and select a job role to get match analysis, rankings, and charts.")
 
-# Main app
-st.title("AI Resume Screening System")
-st.markdown("This app analyzes your resume against selected job roles and provides feedback.")
+job_role = st.selectbox("Select a job role", list(roles_keywords.keys()))
+uploaded_files = st.file_uploader("Upload resumes (PDF format only)", type=["pdf"], accept_multiple_files=True)
 
-job_role = st.selectbox("Select a Job Role", list(roles_keywords.keys()))
+if uploaded_files:
+    all_results = []
+    ranking_results = []
 
-uploaded_file = st.file_uploader("Upload your resume (PDF format only)", type=["pdf"])
+    st.markdown("## 📋 Resume Analysis")
+    for uploaded_file in uploaded_files:
+        resume_text = extract_text_from_pdf(uploaded_file)
+        resume_text_clean = preprocess_text(resume_text)
 
-if uploaded_file:
-    resume_text = extract_text_from_pdf(uploaded_file)
-    resume_text_clean = preprocess_text(resume_text)
-    
-    # Keyword Matching
-    score, matched_keywords = get_keyword_match_score(resume_text_clean, roles_keywords[job_role])
-    
-    # Skill Gap
-    missing_keywords = skill_gap_analysis(roles_keywords[job_role], matched_keywords)
+        score, matched_keywords = get_keyword_match_score(resume_text_clean, roles_keywords[job_role])
+        missing_keywords = skill_gap_analysis(roles_keywords[job_role], matched_keywords)
+        summary = summarize_resume(resume_text)
 
-    # Resume Summary
-    summary = summarize_resume(resume_text)
+        st.subheader(f"📄 Resume: {uploaded_file.name}")
+        st.write(f"**Summary:** {summary}")
+        st.metric(label="Match Percentage", value=f"{score*100:.2f}%")
+        st.write("**Matched Keywords:**", matched_keywords or "No relevant keywords matched.")
+        st.write("**Missing Keywords (Skill Gaps):**", missing_keywords or "No skill gaps detected.")
 
-    st.subheader("Selected Job Role")
-    st.markdown(f"**{job_role}**")
+        with st.expander("📌 Suggestions for Improvement"):
+            if missing_keywords:
+                for skill in missing_keywords:
+                    st.markdown(f"- Consider learning or showcasing **{skill}**.")
+            else:
+                st.write("Your resume aligns very well with the selected role!")
 
-    st.subheader("Resume Summary")
-    st.write(summary)
+        ranking_results.append({
+            "Filename": uploaded_file.name,
+            "Match Score (%)": round(score * 100, 2)
+        })
 
-    st.subheader("Keyword Match Score")
-    st.metric(label="Match Percentage", value=f"{score*100:.2f}%")
+        for kw in roles_keywords[job_role]:
+            all_results.append({
+                "Filename": uploaded_file.name,
+                "Keyword": kw,
+                "Matched": "Yes" if kw in matched_keywords else "No",
+                "Match Score (%)": f"{score*100:.2f}"
+            })
 
-    st.subheader("Matched Keywords")
-    st.write(matched_keywords if matched_keywords else "No relevant keywords matched.")
+    # Rankings
+    ranking_df = pd.DataFrame(ranking_results).sort_values(by="Match Score (%)", ascending=False).reset_index(drop=True)
+    ranking_df.index += 1
+    st.markdown("## 🏆 Resume Rankings")
+    st.dataframe(ranking_df, use_container_width=True)
 
-    st.subheader("Missing Keywords (Skill Gaps)")
-    st.write(missing_keywords if missing_keywords else "No skill gaps detected!")
+    # Bar Chart of Match Scores
+    st.markdown("## 📊 Resume Match Score Chart")
+    bar_fig = px.bar(ranking_df, x="Filename", y="Match Score (%)", color="Match Score (%)",
+                     color_continuous_scale="Blues", height=400, title="Resume Match Scores")
+    st.plotly_chart(bar_fig, use_container_width=True)
 
-    st.subheader("Suggestions for Improvement")
-    if missing_keywords:
-        for skill in missing_keywords:
-            st.markdown(f"- Consider learning or showcasing **{skill}**.")
-    else:
-        st.write("Your resume aligns very well with the selected role!")
-
-    # Export to CSV
-    result_df = pd.DataFrame({
-        "Keyword": roles_keywords[job_role],
-        "Matched": ["Yes" if kw in matched_keywords else "No" for kw in roles_keywords[job_role]]
-    })
+    # CSV Export
+    result_df = pd.DataFrame(all_results)
+    st.markdown("## 📥 Download Match Details")
     st.markdown(get_download_link(result_df), unsafe_allow_html=True)
